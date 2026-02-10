@@ -2,7 +2,9 @@ import os
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from dotenv import load_dotenv
+import logging
 
+logger = logging.getLogger(__name__)
 load_dotenv()
 
 def get_db_connection():
@@ -11,26 +13,23 @@ def get_db_connection():
             host=os.getenv("DB_HOST"),
             database=os.getenv("DB_NAME"),
             user=os.getenv("DB_USER"),
-            password=os.getenv("DB_PASS"),
+            password=os.getenv("DB_PASS"), # Asegúrate que en tu .env se llame DB_PASS
             port=os.getenv("DB_PORT")
         )
         return conn
     except Exception as e:
-        print(f"❌ Error de conexión: {e}")
+        logger.error(f"❌ Error de conexión a BD: {e}")
         return None
 
 def find_orphaned_bookings():
-    """
-    Recupera reservas activas en propiedades inactivas.
-    Filtro estricto: Status Inactivo + Reserva Futura/Presente.
-    """
     conn = get_db_connection()
-    if not conn: return []
+    if not conn: 
+        logger.warning("⚠️ Saltando consulta por fallo de conexión.")
+        return []
 
     try:
         cur = conn.cursor(cursor_factory=RealDictCursor)
         
-        # Traemos Check-in Y Check-out para saber la duración del conflicto
         query = """
             SELECT 
                 l.nickname AS property_name, 
@@ -42,19 +41,22 @@ def find_orphaned_bookings():
             FROM guesty_listing l
             JOIN guesty_reservation r ON l.id = r.listing_id
             WHERE 
-                l.status = 'inactive'  -- DETECTA EL OFFBOARDING
-                AND r.status IN ('confirmed', 'reserved') -- SOLO RESERVAS REALES
-                AND r.check_in >= CURRENT_DATE -- SOLO FUTURAS O DE HOY
+                l.status = 'inactive'
+                AND r.status IN ('confirmed', 'reserved')
+                AND r.check_in >= CURRENT_DATE
             ORDER BY r.check_in ASC;
         """
         
         cur.execute(query)
         results = cur.fetchall()
+        
+        logger.info(f"🔍 Consulta SQL ejecutada. Filas obtenidas: {len(results)}")
+        
         cur.close()
         conn.close()
         return results
 
     except Exception as e:
-        print(f"❌ Error SQL: {e}")
+        logger.error(f"❌ Error SQL ejecutando query: {e}", exc_info=True)
         if conn: conn.close()
         return []
