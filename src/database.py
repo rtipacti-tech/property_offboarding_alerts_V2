@@ -1,119 +1,129 @@
 import os
-import psycopg2
-from psycopg2.extras import RealDictCursor
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from dotenv import load_dotenv
 import logging
 
+# Configuración del logger para este archivo
 logger = logging.getLogger(__name__)
+
 load_dotenv()
 
-def get_db_connection():
-    try:
-        conn = psycopg2.connect(
-            host=os.getenv("DB_HOST"),
-            database=os.getenv("DB_NAME"),
-            user=os.getenv("DB_USER"),
-            password=os.getenv("DB_PASS"),
-            port=os.getenv("DB_PORT")
-        )
-        return conn
-    except Exception as e:
-        logger.error(f"❌ Error de conexión a BD: {e}")
-        return None
-
-def find_orphaned_bookings():
+def send_alert_email(bookings):
     """
-    VERSIÓN HÍBRIDA (SUPERIOR).
-    Combina dos estrategias para no dejar escapar nada:
-    1. OVERLAP: Detecta reservas que pisan CUALQUIER bloqueo 'BLOOFF' (histórico o actual).
-    2. POST-OFFBOARDING: Detecta reservas posteriores al último cierre (lógica oficial).
+    Envía un correo HTML con la tabla de conflictos detectados.
+    Recibe una lista de diccionarios con claves: 
+    'property_name', 'conflict_reason', 'confirmation_code', 'res_check_in', 'res_check_out'
     """
-    conn = get_db_connection()
-    if not conn: 
-        logger.warning("⚠️ Saltando consulta por fallo de conexión.")
-        return []
+    # Si no hay reservas, no hacemos nada
+    if not bookings:
+        return
 
-    try:
-        cur = conn.cursor(cursor_factory=RealDictCursor)
+    sender = os.getenv("EMAIL_SENDER")
+    password = os.getenv("EMAIL_PASSWORD")
+    
+    # 1. Lógica de destinatarios: CX + Rodrigo
+    cx_emails = os.getenv("EMAIL_CX", "")
+    rodrigo_emails = os.getenv("EMAIL_RODRIGO", "")
+    
+    # Unimos, separamos por comas y limpiamos espacios vacíos
+    all_emails_string = f"{cx_emails},{rodrigo_emails}"
+    recipients = [email.strip() for email in all_emails_string.split(",") if email.strip()]
+
+    if not recipients:
+        logger.error("⚠️ Error: No se encontraron destinatarios en el archivo .env (EMAIL_CX / EMAIL_RODRIGO)")
+        return
+
+    # 2. Crear el objeto del mensaje
+    msg = MIMEMultipart()
+    msg['Subject'] = f"🚨 ALERTA CRÍTICA: {len(bookings)} Reservas sobre Bloqueos OFFBOARDING"
+    msg['From'] = sender
+    
+    # --- CAMBIO DE PRIVACIDAD (BCC) ---
+    # En lugar de poner la lista en 'To', ponemos al remitente.
+    # Esto hace que los destinatarios reales (BCC) no vean la lista de correos de los demás.
+    msg['To'] = sender 
+    # ----------------------------------
+
+    # 3. Construcción de la Tabla HTML
+    rows = ""
+    for b in bookings:
+        # Usamos .get() para evitar errores si falta algún dato
+        prop_name = b.get('property_name', 'Desconocida')
+        conflict = b.get('conflict_reason', 'BLOOFF') # Si no viene, asumimos BLOOFF
+        code = b.get('confirmation_code', 'N/A')
+        check_in = str(b.get('res_check_in', 'N/A'))
+        check_out = str(b.get('res_check_out', 'N/A'))
         
-        query = """
-        WITH cleaned_blocks AS (
-            SELECT 
-                nickname,
-                code,
-                -- Limpieza de fechas (igual que la MV oficial)
-                TO_DATE(regexp_replace(check_in, '[[:space:]]+', '', 'g'), 'DD/MM/YYYY') as start_date,
-                TO_DATE(regexp_replace(check_out, '[[:space:]]+', '', 'g'), 'DD/MM/YYYY') as end_date
-            FROM block_gold 
-            WHERE code = 'BLOOFF'
-        ),
-        max_dates AS (
-            -- Calculamos también el último cierre para la lógica oficial
-            SELECT nickname, MAX(start_date) as max_start 
-            FROM cleaned_blocks 
-            GROUP BY nickname
-        )
-        SELECT DISTINCT
-            l.nickname AS property_name, 
-            cb.code AS conflict_reason, 
-            r.confirmation_code,
-            r.status AS reservation_status,
-            r.check_in AS res_check_in,
-            r.check_out AS res_check_out,
-            cb.start_date AS block_start,
-            cb.end_date AS block_end,
-            md.max_start AS last_offboarding
-        FROM guesty_reservation r
-        JOIN guesty_listing l ON r.listing_id = l.id
-        JOIN cleaned_blocks cb ON l.nickname = cb.nickname
-        LEFT JOIN max_dates md ON l.nickname = md.nickname
-        WHERE 
-            r.status IN ('confirmed', 'reserved')
-            -- Filtro de acción: Solo queremos alertas vigentes hoy o a futuro
-            AND r.check_out >= CURRENT_DATE 
-            AND (
-                -- LÓGICA 1: Solapamiento Físico (Atrapa lo que la MV ignora)
-                (r.check_in < cb.end_date AND r.check_out > cb.start_date)
-                
-                OR
-                
-                -- LÓGICA 2: Post-Offboarding (Lógica oficial de la empresa)
-                (r.check_in > md.max_start)
-            )
-        ORDER BY r.check_in ASC;
+        rows += f"""
+        <tr>
+            <td style="padding: 8px; border: 1px solid #ddd;"><b>{prop_name}</b></td>
+            <td style="padding: 8px; border: 1px solid #ddd; color: #D32F2F; font-weight: bold; text-align: center;">{conflict}</td>
+            <td style="padding: 8px; border: 1px solid #ddd;">{code}</td>
+            <td style="padding: 8px; border: 1px solid #ddd;">{check_in}</td>
+            <td style="padding: 8px; border: 1px solid #ddd;">{check_out}</td>
+        </tr>
         """
-        
-        cur.execute(query)
-        results = cur.fetchall()
-        
-        # Procesamiento para que el correo sea claro sobre CUAL de las dos razones fue
-        final_results = []
-        seen_codes = set()
 
-        for row in results:
-            code = row['confirmation_code']
-            if code in seen_codes: continue # Evitar duplicados si cae en ambas lógicas
-            seen_codes.add(code)
-
-            # Determinamos la etiqueta para el correo
-            if row['res_check_in'] > row['last_offboarding']:
-                row['conflict_reason'] = f"POST-CIERRE ({row['last_offboarding']})"
-            else:
-                row['conflict_reason'] = "SOLAPAMIENTO"
+    # 4. Plantilla HTML Profesional
+    html = f"""
+    <html>
+    <body style="font-family: Arial, sans-serif; color: #333;">
+        <div style="max-width: 600px; margin: auto; border: 1px solid #eee; padding: 20px; border-radius: 8px;">
+            <h2 style="color: #D32F2F; border-bottom: 2px solid #D32F2F; padding-bottom: 10px;">
+                ⚠️ Acción Requerida: Conflicto de Calendario
+            </h2>
             
-            final_results.append(row)
+            <p>El sistema de monitoreo ha detectado <b>{len(bookings)} reservas confirmadas</b> que se solapan con un bloqueo de <b>OFFBOARDING (BLOOFF)</b>.</p>
+            
+            <p style="background-color: #fff3cd; padding: 10px; border-left: 4px solid #ffc107; font-size: 13px;">
+                <b>Lógica de Detección:</b> Estas reservas ocurren en fechas marcadas como 'BLOQUEO POR SALIDA' en el calendario maestro (Block Gold).
+            </p>
 
-        count = len(final_results)
-        if count > 0:
-            logger.warning(f"🚨 ALERTA HÍBRIDA: Se detectaron {count} conflictos (Overlap + Post-Cierre).")
-        else:
-            logger.info("✅ Todo limpio: El sistema híbrido no detectó conflictos.")
+            <table style="width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 20px;">
+                <thead>
+                    <tr style="background-color: #f8f9fa; text-align: left;">
+                        <th style="padding: 10px; border: 1px solid #ddd;">Propiedad</th>
+                        <th style="padding: 10px; border: 1px solid #ddd;">Motivo</th>
+                        <th style="padding: 10px; border: 1px solid #ddd;">Reserva</th>
+                        <th style="padding: 10px; border: 1px solid #ddd;">Check-IN</th>
+                        <th style="padding: 10px; border: 1px solid #ddd;">Check-OUT</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {rows}
+                </tbody>
+            </table>
+            
+            <br>
+            <p>Por favor, gestionar la reubicación inmediatamente.</p>
+            <hr style="border: 0; border-top: 1px solid #eee;">
+            <p style="font-size: 11px; color: #999; text-align: center;">
+                Generado autom. por Property Offboarding Monitor v2.0
+            </p>
+        </div>
+    </body>
+    </html>
+    """
+    
+    msg.attach(MIMEText(html, 'html'))
+
+    # 5. Envío SMTP
+    try:
+        logger.info(f"📤 Conectando a Gmail SMTP para enviar a {len(recipients)} destinatarios (BCC)...")
         
-        cur.close()
-        conn.close()
-        return final_results
-
+        server = smtplib.SMTP('smtp.gmail.com', 587)
+        server.starttls()
+        server.login(sender, password)
+        
+        # AQUÍ ESTÁ LA CLAVE: 
+        # Enviamos a la lista 'recipients' (entrega real), pero el header 'To' (visual) solo tiene 'sender'.
+        server.sendmail(sender, recipients, msg.as_string())
+        
+        server.quit()
+        
+        logger.info("✅ Correo de alerta enviado exitosamente (Destinatarios ocultos).")
+        
     except Exception as e:
-        logger.error(f"❌ Error ejecutando Query Híbrida: {e}", exc_info=True)
-        if conn: conn.close()
-        return []
+        logger.error(f"❌ Falló el envío del correo: {e}", exc_info=True)
