@@ -1,129 +1,144 @@
 import os
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
+import psycopg2
+from psycopg2.extras import RealDictCursor
 from dotenv import load_dotenv
 import logging
+from datetime import datetime, date
 
-# Configuración del logger para este archivo
 logger = logging.getLogger(__name__)
-
 load_dotenv()
 
-def send_alert_email(bookings):
-    """
-    Envía un correo HTML con la tabla de conflictos detectados.
-    Recibe una lista de diccionarios con claves: 
-    'property_name', 'conflict_reason', 'confirmation_code', 'res_check_in', 'res_check_out'
-    """
-    # Si no hay reservas, no hacemos nada
-    if not bookings:
-        return
-
-    sender = os.getenv("EMAIL_SENDER")
-    password = os.getenv("EMAIL_PASSWORD")
-    
-    # 1. Lógica de destinatarios: CX + Rodrigo
-    cx_emails = os.getenv("EMAIL_CX", "")
-    rodrigo_emails = os.getenv("EMAIL_RODRIGO", "")
-    
-    # Unimos, separamos por comas y limpiamos espacios vacíos
-    all_emails_string = f"{cx_emails},{rodrigo_emails}"
-    recipients = [email.strip() for email in all_emails_string.split(",") if email.strip()]
-
-    if not recipients:
-        logger.error("⚠️ Error: No se encontraron destinatarios en el archivo .env (EMAIL_CX / EMAIL_RODRIGO)")
-        return
-
-    # 2. Crear el objeto del mensaje
-    msg = MIMEMultipart()
-    msg['Subject'] = f"🚨 ALERTA CRÍTICA: {len(bookings)} Reservas sobre Bloqueos OFFBOARDING"
-    msg['From'] = sender
-    
-    # --- CAMBIO DE PRIVACIDAD (BCC) ---
-    # En lugar de poner la lista en 'To', ponemos al remitente.
-    # Esto hace que los destinatarios reales (BCC) no vean la lista de correos de los demás.
-    msg['To'] = sender 
-    # ----------------------------------
-
-    # 3. Construcción de la Tabla HTML
-    rows = ""
-    for b in bookings:
-        # Usamos .get() para evitar errores si falta algún dato
-        prop_name = b.get('property_name', 'Desconocida')
-        conflict = b.get('conflict_reason', 'BLOOFF') # Si no viene, asumimos BLOOFF
-        code = b.get('confirmation_code', 'N/A')
-        check_in = str(b.get('res_check_in', 'N/A'))
-        check_out = str(b.get('res_check_out', 'N/A'))
-        
-        rows += f"""
-        <tr>
-            <td style="padding: 8px; border: 1px solid #ddd;"><b>{prop_name}</b></td>
-            <td style="padding: 8px; border: 1px solid #ddd; color: #D32F2F; font-weight: bold; text-align: center;">{conflict}</td>
-            <td style="padding: 8px; border: 1px solid #ddd;">{code}</td>
-            <td style="padding: 8px; border: 1px solid #ddd;">{check_in}</td>
-            <td style="padding: 8px; border: 1px solid #ddd;">{check_out}</td>
-        </tr>
-        """
-
-    # 4. Plantilla HTML Profesional
-    html = f"""
-    <html>
-    <body style="font-family: Arial, sans-serif; color: #333;">
-        <div style="max-width: 600px; margin: auto; border: 1px solid #eee; padding: 20px; border-radius: 8px;">
-            <h2 style="color: #D32F2F; border-bottom: 2px solid #D32F2F; padding-bottom: 10px;">
-                ⚠️ Acción Requerida: Conflicto de Calendario
-            </h2>
-            
-            <p>El sistema de monitoreo ha detectado <b>{len(bookings)} reservas confirmadas</b> que se solapan con un bloqueo de <b>OFFBOARDING (BLOOFF)</b>.</p>
-            
-            <p style="background-color: #fff3cd; padding: 10px; border-left: 4px solid #ffc107; font-size: 13px;">
-                <b>Lógica de Detección:</b> Estas reservas ocurren en fechas marcadas como 'BLOQUEO POR SALIDA' en el calendario maestro (Block Gold).
-            </p>
-
-            <table style="width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 20px;">
-                <thead>
-                    <tr style="background-color: #f8f9fa; text-align: left;">
-                        <th style="padding: 10px; border: 1px solid #ddd;">Propiedad</th>
-                        <th style="padding: 10px; border: 1px solid #ddd;">Motivo</th>
-                        <th style="padding: 10px; border: 1px solid #ddd;">Reserva</th>
-                        <th style="padding: 10px; border: 1px solid #ddd;">Check-IN</th>
-                        <th style="padding: 10px; border: 1px solid #ddd;">Check-OUT</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {rows}
-                </tbody>
-            </table>
-            
-            <br>
-            <p>Por favor, gestionar la reubicación inmediatamente.</p>
-            <hr style="border: 0; border-top: 1px solid #eee;">
-            <p style="font-size: 11px; color: #999; text-align: center;">
-                Generado autom. por Property Offboarding Monitor v2.0
-            </p>
-        </div>
-    </body>
-    </html>
-    """
-    
-    msg.attach(MIMEText(html, 'html'))
-
-    # 5. Envío SMTP
+def get_db_connection():
     try:
-        logger.info(f"📤 Conectando a Gmail SMTP para enviar a {len(recipients)} destinatarios (BCC)...")
-        
-        server = smtplib.SMTP('smtp.gmail.com', 587)
-        server.starttls()
-        server.login(sender, password)
-        
-        # AQUÍ ESTÁ LA CLAVE: 
-        # Enviamos a la lista 'recipients' (entrega real), pero el header 'To' (visual) solo tiene 'sender'.
-        server.sendmail(sender, recipients, msg.as_string())
-        
-        server.quit()
-        
-        logger.info("✅ Correo de alerta enviado exitosamente (Destinatarios ocultos).")
-        
+        conn = psycopg2.connect(
+            host=os.getenv("DB_HOST"),
+            database=os.getenv("DB_NAME"),
+            user=os.getenv("DB_USER"),
+            password=os.getenv("DB_PASS"),
+            port=os.getenv("DB_PORT")
+        )
+        return conn
     except Exception as e:
-        logger.error(f"❌ Falló el envío del correo: {e}", exc_info=True)
+        logger.error(f"❌ Error de conexión a BD: {e}")
+        return None
+
+def find_orphaned_bookings():
+    """
+    MODO AUDITORÍA TOTAL (PASADO, PRESENTE Y FUTURO)
+    
+    Analiza reservas confirmadas que violan reglas de Offboarding.
+    1. OVERLAP HISTÓRICO: ¿Hubo reservas encima de un BLOOFF en el pasado?
+    2. POST-CIERRE VIGENTE: ¿Hay reservas futuras después del cierre definitivo?
+    """
+    conn = get_db_connection()
+    if not conn: return []
+
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        
+        query = """
+        WITH cleaned_blocks AS (
+            -- 1. Traemos TODOS los BLOOFF de la historia (limpios desde block_gold)
+            SELECT 
+                nickname,
+                TO_DATE(regexp_replace(check_in, '[[:space:]]+', '', 'g'), 'DD/MM/YYYY') as start_date,
+                TO_DATE(regexp_replace(check_out, '[[:space:]]+', '', 'g'), 'DD/MM/YYYY') as end_date
+            FROM block_gold 
+            WHERE code = 'BLOOFF'
+        ),
+        last_offboarding AS (
+            -- 2. Calculamos el ÚLTIMO cierre conocido por propiedad
+            SELECT DISTINCT ON (nickname) 
+                nickname,
+                start_date,
+                end_date
+            FROM cleaned_blocks
+            ORDER BY nickname, start_date DESC
+        )
+        SELECT DISTINCT
+            l.nickname AS property_name, 
+            'ANALIZANDO...' AS conflict_reason, 
+            r.confirmation_code,
+            r.status AS reservation_status,
+            r.check_in AS res_check_in,
+            r.check_out AS res_check_out,
+            cb.start_date AS block_start,
+            cb.end_date AS block_end,
+            lo.start_date AS last_off_start,
+            lo.end_date AS last_off_end
+        FROM guesty_reservation r
+        JOIN guesty_listing l ON r.listing_id = l.id
+        -- Hacemos JOIN con todos los bloques para detectar choques históricos
+        JOIN cleaned_blocks cb ON l.nickname = cb.nickname
+        -- Hacemos JOIN con el último cierre para detectar fugas futuras
+        LEFT JOIN last_offboarding lo ON l.nickname = lo.nickname
+        WHERE 
+            r.status IN ('confirmed', 'reserved')
+            
+            AND (
+                -- CASO 1: SOLAPAMIENTO DIRECTO (Histórico o Futuro)
+                -- La reserva pisa físicamente un bloque BLOOFF existente en block_gold.
+                (r.check_in < cb.end_date AND r.check_out > cb.start_date)
+                
+                OR
+                
+                -- CASO 2: POST-CIERRE DEFINITIVO (Lógica MV Oficial)
+                -- Solo aplica si el Último Offboarding sigue vigente (termina en el futuro o es largo)
+                -- y la reserva es posterior a ese inicio.
+                (
+                    r.check_in > lo.start_date 
+                    AND lo.end_date >= CURRENT_DATE 
+                    AND r.listing_id = l.id -- asegurar consistencia
+                )
+            )
+            
+        ORDER BY r.check_in ASC;
+        """
+        
+        cur.execute(query)
+        results = cur.fetchall()
+        
+        # Procesamiento final para etiquetar correctamente en el correo
+        final_results = []
+        seen_codes = set()
+
+        for row in results:
+            code = row['confirmation_code']
+            if code in seen_codes: continue 
+            seen_codes.add(code)
+
+            # Lógica de Etiquetado para que entiendas qué pasó
+            res_start = row['res_check_in']
+            block_start = row['block_start']
+            last_off_start = row['last_off_start']
+            
+            # Si es pasado (ya ocurrió)
+            if row['res_check_out'] < date.today():
+                if res_start > last_off_start:
+                    row['conflict_reason'] = "HISTÓRICO: POST-CIERRE"
+                else:
+                    row['conflict_reason'] = "HISTÓRICO: OVERLAP"
+            
+            # Si es futuro (Alerta accionable)
+            else:
+                if res_start > last_off_start:
+                    row['conflict_reason'] = f"ACTIVO: POST-CIERRE ({last_off_start})"
+                else:
+                    row['conflict_reason'] = "ACTIVO: OVERLAP"
+
+            final_results.append(row)
+
+        count = len(final_results)
+        if count > 0:
+            logger.warning(f"🚨 AUDITORÍA COMPLETA: Se detectaron {count} conflictos (Pasados y Futuros).")
+        else:
+            logger.info("✅ Propiedad Inmaculada: No hay conflictos ni históricos ni futuros.")
+        
+        cur.close()
+        conn.close()
+        return final_results
+
+    except Exception as e:
+        logger.error(f"❌ Error en Query Auditoría: {e}", exc_info=True)
+        if conn: conn.close()
+        return []
