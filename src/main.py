@@ -15,31 +15,21 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 def run_job():
-    logger.info("🚀 Iniciando ejecución programada del Monitor de Offboarding (Modo Dual)...")
+    logger.info("🚀 Iniciando Monitor de Offboarding (Reporte Visual)...")
     
     try:
-        # 1. Buscamos conflictos de Reservas (Listado Urgente)
-        # (Reservas chocando con Bloqueos Físicos o Fecha Oficial)
-        conflicts = database.find_orphaned_bookings()
+        # 1. Obtener reporte completo (Reservas de propiedades en cierre)
+        # Trae tanto las conflictivas como las sanas para mostrarlas en el correo.
+        report_data = database.get_offboarding_report()
         
-        # 2. Buscamos el Listado Oficial de Offboarding (Listado Informativo)
-        # (Propiedades con fecha de corte en 'offboarding_guesty' reciente o futura)
-        official_list = database.find_offboarding_listings()
-        
-        # 3. Decisión lógica: Si hay datos en CUALQUIERA de las dos listas, enviamos el reporte.
-        if conflicts or official_list:
-            count_conflicts = len(conflicts)
-            count_official = len(official_list)
-            
-            logger.warning(f"⚠️ REPORTE GENERADO: {count_conflicts} conflictos críticos y {count_official} propiedades en cierre.")
-            logger.info("📧 Procediendo a enviar el correo combinado...")
-            
-            # Pasamos AMBAS listas al mailer
-            mailer.send_alert_email(conflicts, official_list)
-            
+        # 2. Enviar correo siempre que haya datos
+        # (El mailer se encargará de pintar rojo/verde según corresponda)
+        if report_data:
+            logger.info(f"📨 Enviando reporte con {len(report_data)} filas...")
+            mailer.send_alert_email(report_data)
             logger.info("🏁 Proceso finalizado exitosamente.")
         else:
-            logger.info("✅ Sin novedades. El sistema está limpio y no hay cierres recientes. No se envía correo.")
+            logger.info("✅ No hay propiedades en proceso de cierre o sin reservas recientes.")
 
     except Exception as e:
         logger.critical(f"💀 Error fatal en el proceso principal: {e}", exc_info=True)
