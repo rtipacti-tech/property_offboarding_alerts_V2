@@ -85,7 +85,7 @@ def send_alert_email(booking_conflicts, offboarding_listings):
             """
         table_off = f"""
         <h3 style="color: #1976D2; margin-top: 30px;">📋 2. Propiedades con Fecha de Corte (Últimos 30 días y a Futuro)</h3>
-        <p style="font-size: 11px; color: #666;">Fuente: Columna 'offboarding_guesty' en Power BI</p>
+        <p style="font-size: 11px; color: #666;">Fuente: 'offboarding_guesty' </p>
         <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
             <tr style="background-color: #e3f2fd;"><th>Propiedad</th><th>Fecha Corte</th><th>País</th></tr>
             {rows_off}
