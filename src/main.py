@@ -15,19 +15,31 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 def run_job():
-    logger.info("🚀 Iniciando ejecución programada del Monitor de Offboarding...")
+    logger.info("🚀 Iniciando ejecución programada del Monitor de Offboarding (Modo Dual)...")
     
     try:
-        # 1. Buscamos conflictos
+        # 1. Buscamos conflictos de Reservas (Listado Urgente)
+        # (Reservas chocando con Bloqueos Físicos o Fecha Oficial)
         conflicts = database.find_orphaned_bookings()
         
-        # 2. Decisión lógica
-        if conflicts:
-            logger.warning(f"⚠️ ALERTA: Se encontraron {len(conflicts)} problemas. Procediendo a notificar.")
-            mailer.send_alert_email(conflicts)
-            logger.info("🏁 Proceso finalizado con envío de correos.")
+        # 2. Buscamos el Listado Oficial de Offboarding (Listado Informativo)
+        # (Propiedades con fecha de corte en 'offboarding_guesty' reciente o futura)
+        official_list = database.find_offboarding_listings()
+        
+        # 3. Decisión lógica: Si hay datos en CUALQUIERA de las dos listas, enviamos el reporte.
+        if conflicts or official_list:
+            count_conflicts = len(conflicts)
+            count_official = len(official_list)
+            
+            logger.warning(f"⚠️ REPORTE GENERADO: {count_conflicts} conflictos críticos y {count_official} propiedades en cierre.")
+            logger.info("📧 Procediendo a enviar el correo combinado...")
+            
+            # Pasamos AMBAS listas al mailer
+            mailer.send_alert_email(conflicts, official_list)
+            
+            logger.info("🏁 Proceso finalizado exitosamente.")
         else:
-            logger.info("✅ Sin novedades. El sistema está limpio. No se envía correo.")
+            logger.info("✅ Sin novedades. El sistema está limpio y no hay cierres recientes. No se envía correo.")
 
     except Exception as e:
         logger.critical(f"💀 Error fatal en el proceso principal: {e}", exc_info=True)
