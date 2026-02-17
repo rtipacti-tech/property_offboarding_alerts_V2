@@ -41,7 +41,7 @@ def get_offboarding_report():
             -- CHECK-IN (Fecha Real)
             TO_DATE(regexp_replace(r."CHECK IN", '[[:space:]]+', '', 'g'), 'DD/MM/YYYY') AS "check_in_date",
             
-            -- CHECK-OUT (Fecha Real) -> NECESARIO PARA TU NUEVA LÓGICA
+            -- CHECK-OUT (Fecha Real)
             TO_DATE(regexp_replace(r."CHECK OUT", '[[:space:]]+', '', 'g'), 'DD/MM/YYYY') AS "check_out_date",
             
             -- Textos originales para mostrar en tabla
