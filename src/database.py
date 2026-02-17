@@ -22,7 +22,7 @@ def get_db_connection():
         logger.error(f"❌ Error de conexión a BD: {e}")
         return None
 
-# --- LISTA 1: CONFLICTOS DE RESERVAS (La que ya validamos) ---
+# --- LISTA 1: CONFLICTOS DE RESERVAS
 def find_orphaned_bookings():
     """
     Busca reservas que chocan con bloqueos físicos o fechas de cierre.
