@@ -76,7 +76,7 @@ def send_alert_email(data):
             <h2 style="color: #333; border-bottom: 2px solid #333; padding-bottom: 10px;">
                 📅 Monitor de Offboarding
             </h2>
-            <p>Validación: Reservas que finalizan después de la fecha de corte oficial.</p>
+            <p>Validación: Reservas que finalizan después de la fecha de offboarding_guesty.</p>
             
             <div style="margin-bottom: 20px; padding: 10px; background-color: #f5f5f5; border-radius: 5px;">
                 <strong>Resumen:</strong> <span style="color: #c62828; font-weight: bold;">{alert_count} Conflictos</span> detectados de {len(data)} reservas analizadas.
@@ -86,8 +86,8 @@ def send_alert_email(data):
                 <thead>
                     <tr style="background-color: #333; color: white; text-align: left;">
                         <th style="padding: 10px;">PROPIEDAD</th>
-                        <th style="padding: 10px;">CÓDIGO</th>
-                        <th style="padding: 10px;">FECHA CORTE</th>
+                        <th style="padding: 10px;">CODIGO DE CONFIRMACION</th>
+                        <th style="padding: 10px;">FECHA DE OFF_GUESTY</th>
                         <th style="padding: 10px;">CHECK IN</th>
                         <th style="padding: 10px;">CHECK OUT</th>
                         <th style="padding: 10px; text-align: center;">ESTADO</th>
