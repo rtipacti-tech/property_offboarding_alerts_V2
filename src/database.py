@@ -25,6 +25,7 @@ def get_db_connection():
 def get_proactive_report():
     conn = get_db_connection()
     if not conn: return []
+    cur = None
     try:
         cur = conn.cursor(cursor_factory=RealDictCursor)
         query = """
@@ -47,12 +48,13 @@ def get_proactive_report():
         """
         cur.execute(query)
         results = cur.fetchall()
-        cur.close()
-        conn.close()
         return results
     except Exception as e:
         logger.error(f"❌ Error Proactivo: {e}")
         return []
+    finally:
+        if cur: cur.close()
+        if conn: conn.close()
 
 # --- CONSULTA 2: SISTEMA REACTIVO (Histórico Completo) ---
 def get_reactive_report():
@@ -62,6 +64,7 @@ def get_reactive_report():
     """
     conn = get_db_connection()
     if not conn: return []
+    cur = None
     try:
         cur = conn.cursor(cursor_factory=RealDictCursor)
         query = """
@@ -86,9 +89,10 @@ def get_reactive_report():
         """
         cur.execute(query)
         results = cur.fetchall()
-        cur.close()
-        conn.close()
         return results
     except Exception as e:
         logger.error(f"❌ Error Reactivo: {e}")
         return []
+    finally:
+        if cur: cur.close()
+        if conn: conn.close()
