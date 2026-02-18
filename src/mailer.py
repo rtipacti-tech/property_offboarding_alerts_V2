@@ -8,95 +8,122 @@ import logging
 logger = logging.getLogger(__name__)
 load_dotenv()
 
-def send_alert_email(data):
-    if not data: return
+def format_date_mx(date_obj):
+    if date_obj: return date_obj.strftime('%d/%m/%Y')
+    return "N/A"
+
+def create_row_html(row, is_violation=False):
+    """Ayuda a crear filas HTML para no repetir código"""
+    country = row.get('country', 'N/A')
+    prop = row.get('property', 'N/A')
+    code = row.get('confirmation_code', 'N/A')
+    
+    off_date_str = format_date_mx(row.get('offboarding_date'))
+    check_in_str = format_date_mx(row.get('check_in_date'))
+    check_out_str = format_date_mx(row.get('check_out_date'))
+
+    if is_violation:
+        status_icon = "❌ ALERTA"
+        row_style = "background-color: #ffebee; color: #c62828; font-weight: bold;"
+    else:
+        status_icon = "✅ OK"
+        row_style = "color: #2e7d32;"
+
+    return f"""
+    <tr style="{row_style}">
+        <td style="padding: 8px; border: 1px solid #ddd;">{country}</td>
+        <td style="padding: 8px; border: 1px solid #ddd;">{prop}</td>
+        <td style="padding: 8px; border: 1px solid #ddd;">{code}</td>
+        <td style="padding: 8px; border: 1px solid #ddd;">{off_date_str}</td>
+        <td style="padding: 8px; border: 1px solid #ddd;">{check_in_str}</td>
+        <td style="padding: 8px; border: 1px solid #ddd;">{check_out_str}</td>
+        <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">{status_icon}</td>
+    </tr>
+    """
+
+def send_alert_email(proactive_data, reactive_data):
+    if not proactive_data and not reactive_data: return
 
     sender = os.getenv("EMAIL_SENDER")
     password = os.getenv("EMAIL_PASSWORD")
-    
-    # Destinatarios
     cx_emails = os.getenv("EMAIL_CX", "")
     rodrigo_emails = os.getenv("EMAIL_RODRIGO", "")
     all_emails_string = f"{cx_emails},{rodrigo_emails}"
     recipients = [email.strip() for email in all_emails_string.split(",") if email.strip()]
 
-    if not recipients:
-        logger.error("⚠️ Error: No hay destinatarios.")
-        return
+    if not recipients: return
 
     msg = MIMEMultipart()
-    msg['Subject'] = f"📊 Reporte Offboarding: {len(data)} Reservas (Validación por Check-Out)"
+    total_alerts = 0
+    
+    # 1. PROCESAR SISTEMA PROACTIVO Y ALERTAS ACTUALES
+    rows_proactive = ""
+    rows_current_alerts = ""
+    current_alert_count = 0
+
+    if proactive_data:
+        for row in proactive_data:
+            # Detectar violación
+            off = row.get('offboarding_date')
+            out = row.get('check_out_date')
+            is_bad = (out and off and out > off)
+
+            html_row = create_row_html(row, is_bad)
+            rows_proactive += html_row
+            
+            if is_bad:
+                rows_current_alerts += html_row
+                current_alert_count += 1
+
+    # 2. PROCESAR SISTEMA REACTIVO (HISTÓRICO)
+    rows_reactive = ""
+    reactive_count = 0
+    if reactive_data:
+        for row in reactive_data:
+            # Aquí TODAS son malas por definición de la query
+            rows_reactive += create_row_html(row, is_violation=True)
+            reactive_count += 1
+
+    total_alerts = current_alert_count + reactive_count
+    msg['Subject'] = f"📊 Reporte Offboarding: {current_alert_count} Alertas Activas / {reactive_count} Históricas"
     msg['From'] = sender
-    msg['To'] = sender 
+    msg['To'] =", ".join(recipients)
 
-    rows = ""
-    alert_count = 0
-
-    for row in data:
-        prop = row.get('property', 'N/A')
-        code = row.get('confirmation_code', 'N/A')
-        
-        # Objetos de fecha reales
-        off_date = row.get('offboarding_date') 
-        check_out_date = row.get('check_out_date')
-        
-        # Textos para mostrar
-        off_date_str = str(off_date)
-        check_in_str = row.get('check_in_str', 'N/A')
-        check_out_str = row.get('check_out_str', 'N/A')
-
-        # --- LÓGICA DE ALERTA CORREGIDA ---
-        # Si la reserva TERMINA después de la fecha de Offboarding -> ALERTA
-        # (Ej: Cierra el 10, sale el 11 -> MAL)
-        if check_out_date and off_date and check_out_date > off_date:
-            status_icon = "❌ ALERTA"
-            # Rojo claro para destacar el error
-            row_style = "background-color: #ffebee; color: #c62828; font-weight: bold;"
-            alert_count += 1
-        else:
-            status_icon = "✅ OK"
-            # Verde normal
-            row_style = "color: #2e7d32;"
-
-        rows += f"""
-        <tr style="{row_style}">
-            <td style="padding: 10px; border: 1px solid #ddd;">{prop}</td>
-            <td style="padding: 10px; border: 1px solid #ddd;">{code}</td>
-            <td style="padding: 10px; border: 1px solid #ddd;">{off_date_str}</td>
-            <td style="padding: 10px; border: 1px solid #ddd;">{check_in_str}</td>
-            <td style="padding: 10px; border: 1px solid #ddd;">{check_out_str}</td>
-            <td style="padding: 10px; border: 1px solid #ddd; text-align: center; font-size: 14px;">{status_icon}</td>
-        </tr>
-        """
+    # --- HTML ---
+    # Tablas vacías si no hay datos
+    empty_row = '<tr><td colspan="7" style="padding:15px; text-align:center; color:#666; background:#f9f9f9;">✅ Sin datos para mostrar.</td></tr>'
+    
+    table_proactive = rows_proactive if rows_proactive else empty_row
+    table_alerts = rows_current_alerts if rows_current_alerts else empty_row
+    table_reactive = rows_reactive if rows_reactive else empty_row
 
     html = f"""
     <html>
-    <body style="font-family: Arial, sans-serif; color: #333;">
-        <div style="max-width: 900px; margin: auto; padding: 20px; border: 1px solid #eee; border-radius: 8px;">
-            <h2 style="color: #333; border-bottom: 2px solid #333; padding-bottom: 10px;">
-                📅 Monitor de Offboarding
-            </h2>
-            <p>Validación: Reservas que finalizan después de la fecha de offboarding_guesty.</p>
-            
-            <div style="margin-bottom: 20px; padding: 10px; background-color: #f5f5f5; border-radius: 5px;">
-                <strong>Resumen:</strong> <span style="color: #c62828; font-weight: bold;">{alert_count} Conflictos</span> detectados de {len(data)} reservas analizadas.
-            </div>
+    <body style="font-family: Arial, sans-serif; color: #333; font-size: 12px;">
+        <div style="max-width: 1000px; margin: auto; padding: 20px; border: 1px solid #ccc;">
+            <h2 style="border-bottom: 2px solid #333;">📅 Monitor Global de Offboarding</h2>
 
-            <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
-                <thead>
-                    <tr style="background-color: #333; color: white; text-align: left;">
-                        <th style="padding: 10px;">PROPIEDAD</th>
-                        <th style="padding: 10px;">CODIGO DE CONFIRMACION</th>
-                        <th style="padding: 10px;">FECHA DE OFF_GUESTY</th>
-                        <th style="padding: 10px;">CHECK IN</th>
-                        <th style="padding: 10px;">CHECK OUT</th>
-                        <th style="padding: 10px; text-align: center;">ESTADO</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {rows}
-                </tbody>
+            <h3 style="color: #1565C0; background: #E3F2FD; padding: 5px;">🔹 Sistema Proactivo (Panorama Actual -30 días).</h3>
+            <table style="width: 100%; border-collapse: collapse;">
+                <tr style="background:#f0f0f0; text-align:left;"><th>COUNTRY</th><th>PROPERTY</th><th>CONFIRMATION CODE</th><th>OFFBOARDING GUESTY</th><th>CHECK IN</th><th>CHECK OUT</th><th>STATUS</th></tr>
+                {table_proactive}
             </table>
+            <br>
+
+            <h3 style="color: #c62828; background: #FFEBEE; padding: 5px;">🚨 Alertas Activas (Requieren Acción)</h3>
+            <table style="width: 100%; border-collapse: collapse;">
+                <tr style="background:#ffebee; color:#c62828; text-align:left;"><th>COUNTRY</th><th>PROPERTY</th><th>CONFIRMATION CODE</th><th>OFFBOARDING GUESTY</th><th>CHECK IN</th><th>CHECK OUT</th><th>STATUS</th></tr>
+                {table_alerts}
+            </table>
+            <br>
+
+            <h3 style="color: #424242; background: #EEEEEE; padding: 5px;">⚫ Sistema Reactivo (Historial de Incidencias)</h3>
+            <p>Todas las reservas en la historia de la BD que terminaron después de la fecha de offboarding.</p>
+            <table style="width: 100%; border-collapse: collapse;">
+                <tr style="background:#616161; color:white; text-align:left;"><th>COUNTRY</th><th>PROPERTY</th><th>CONFIRMATION CODE</th><th>OFFBOARDING GUESTY</th><th>CHECK IN</th><th>CHECK OUT</th><th>STATUS</th></tr>
+                {table_reactive}
+            </table>
+
         </div>
     </body>
     </html>
@@ -108,6 +135,6 @@ def send_alert_email(data):
         server.login(sender, password)
         server.sendmail(sender, recipients, msg.as_string())
         server.quit()
-        logger.info("✅ Reporte enviado.")
+        logger.info("✅ Reporte Completo (3 Secciones) enviado.")
     except Exception as e:
         logger.error(f"❌ Falló envío: {e}")
