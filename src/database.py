@@ -34,16 +34,26 @@ def get_proactive_report():
             r."LISTING'S NICKNAME" AS "property",
             r."CONFIRMATION CODE" AS "confirmation_code",
             mv.offboarding_guesty AS "offboarding_date",
+            
+            -- EXTRAEMOS EL JSON ('active')
+            gl.data ->> 'active' AS "status_json",
+            
             TO_DATE(regexp_replace(r."CHECK IN", '[[:space:]]+', '', 'g'), 'DD/MM/YYYY') AS "check_in_date",
             TO_DATE(regexp_replace(r."CHECK OUT", '[[:space:]]+', '', 'g'), 'DD/MM/YYYY') AS "check_out_date"
+            
         FROM reservation_gold r
         JOIN mv_listings mv ON r."LISTING'S NICKNAME" = mv.nickname
+        
+        -- UNIMOS LA TABLA DEL JSON
+        LEFT JOIN guesty_listing gl ON r."LISTING'S NICKNAME" = gl.nickname
+        
         WHERE 
             lower(trim(r."STATUS")) = 'confirmed'
             AND mv.offboarding_guesty IS NOT NULL
             -- Filtro de tiempo: Últimos 30 días o Futuro
             AND mv.offboarding_guesty >= (CURRENT_DATE - INTERVAL '30 days')
             AND TO_DATE(regexp_replace(r."CHECK OUT", '[[:space:]]+', '', 'g'), 'DD/MM/YYYY') >= (CURRENT_DATE - INTERVAL '30 days')
+            
         ORDER BY mv.offboarding_guesty ASC, "check_in_date" ASC;
         """
         cur.execute(query)
@@ -73,10 +83,19 @@ def get_reactive_report():
             r."LISTING'S NICKNAME" AS "property",
             r."CONFIRMATION CODE" AS "confirmation_code",
             mv.offboarding_guesty AS "offboarding_date",
+            
+            -- EXTRAEMOS EL JSON ('active')
+            gl.data ->> 'active' AS "status_json",
+            
             TO_DATE(regexp_replace(r."CHECK IN", '[[:space:]]+', '', 'g'), 'DD/MM/YYYY') AS "check_in_date",
             TO_DATE(regexp_replace(r."CHECK OUT", '[[:space:]]+', '', 'g'), 'DD/MM/YYYY') AS "check_out_date"
+            
         FROM reservation_gold r
         JOIN mv_listings mv ON r."LISTING'S NICKNAME" = mv.nickname
+        
+        -- UNIMOS LA TABLA DEL JSON
+        LEFT JOIN guesty_listing gl ON r."LISTING'S NICKNAME" = gl.nickname
+        
         WHERE 
             lower(trim(r."STATUS")) = 'confirmed'
             AND mv.offboarding_guesty IS NOT NULL

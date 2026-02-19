@@ -21,6 +21,17 @@ def create_row_html(row, is_violation=False):
     off_date_str = format_date_mx(row.get('offboarding_date'))
     check_in_str = format_date_mx(row.get('check_in_date'))
     check_out_str = format_date_mx(row.get('check_out_date'))
+    
+    # --- TRADUCCIÓN DE STATUS GUESTY (True/False -> Active/Inactive) ---
+    raw_guesty = str(row.get('status_json', '')).strip().lower()
+    
+    if raw_guesty == 'true':
+        status_guesty = "ACTIVE"
+    elif raw_guesty == 'false':
+        status_guesty = "INACTIVE"
+    else:
+        status_guesty = "N/A"
+    # -------------------------------------------------------------------
 
     if is_violation:
         status_icon = "❌ ALERTA"
@@ -38,6 +49,7 @@ def create_row_html(row, is_violation=False):
         <td style="padding: 8px; border: 1px solid #ddd;">{check_in_str}</td>
         <td style="padding: 8px; border: 1px solid #ddd;">{check_out_str}</td>
         <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">{status_icon}</td>
+        <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">{status_guesty}</td>
     </tr>
     """
 
@@ -90,8 +102,8 @@ def send_alert_email(proactive_data, reactive_data):
     msg['To'] =", ".join(recipients)
 
     # --- HTML ---
-    # Tablas vacías si no hay datos
-    empty_row = '<tr><td colspan="7" style="padding:15px; text-align:center; color:#666; background:#f9f9f9;">✅ Sin datos para mostrar.</td></tr>'
+    # Tablas vacías si no hay datos. Actualizado a colspan="8" por la nueva columna.
+    empty_row = '<tr><td colspan="8" style="padding:15px; text-align:center; color:#666; background:#f9f9f9;">✅ Sin datos para mostrar.</td></tr>'
     
     table_proactive = rows_proactive if rows_proactive else empty_row
     table_alerts = rows_current_alerts if rows_current_alerts else empty_row
@@ -100,19 +112,23 @@ def send_alert_email(proactive_data, reactive_data):
     html = f"""
     <html>
     <body style="font-family: Arial, sans-serif; color: #333; font-size: 12px;">
-        <div style="max-width: 1000px; margin: auto; padding: 20px; border: 1px solid #ccc;">
+        <div style="max-width: 1100px; margin: auto; padding: 20px; border: 1px solid #ccc;">
             <h2 style="border-bottom: 2px solid #333;">📅 Monitor Global de Offboarding</h2>
 
             <h3 style="color: #1565C0; background: #E3F2FD; padding: 5px;">🔹 Sistema Proactivo (Panorama Actual -30 días).</h3>
             <table style="width: 100%; border-collapse: collapse;">
-                <tr style="background:#f0f0f0; text-align:left;"><th>COUNTRY</th><th>PROPERTY</th><th>CONFIRMATION CODE</th><th>OFFBOARDING GUESTY</th><th>CHECK IN</th><th>CHECK OUT</th><th>STATUS</th></tr>
+                <tr style="background:#f0f0f0; text-align:left;">
+                    <th>COUNTRY</th><th>PROPERTY</th><th>CONFIRMATION CODE</th><th>OFFBOARDING GUESTY</th><th>CHECK IN</th><th>CHECK OUT</th><th style="text-align: center;">STATUS</th><th style="text-align: center;">STATUS GUESTY</th>
+                </tr>
                 {table_proactive}
             </table>
             <br>
 
             <h3 style="color: #c62828; background: #FFEBEE; padding: 5px;">🚨 Alertas Activas (Requieren Acción)</h3>
             <table style="width: 100%; border-collapse: collapse;">
-                <tr style="background:#ffebee; color:#c62828; text-align:left;"><th>COUNTRY</th><th>PROPERTY</th><th>CONFIRMATION CODE</th><th>OFFBOARDING GUESTY</th><th>CHECK IN</th><th>CHECK OUT</th><th>STATUS</th></tr>
+                <tr style="background:#ffebee; color:#c62828; text-align:left;">
+                    <th>COUNTRY</th><th>PROPERTY</th><th>CONFIRMATION CODE</th><th>OFFBOARDING GUESTY</th><th>CHECK IN</th><th>CHECK OUT</th><th style="text-align: center;">STATUS</th><th style="text-align: center;">STATUS GUESTY</th>
+                </tr>
                 {table_alerts}
             </table>
             <br>
@@ -120,7 +136,9 @@ def send_alert_email(proactive_data, reactive_data):
             <h3 style="color: #424242; background: #EEEEEE; padding: 5px;">⚫ Sistema Reactivo (Historial de Incidencias)</h3>
             <p>Todas las reservas en la historia de la BD que terminaron después de la fecha de offboarding.</p>
             <table style="width: 100%; border-collapse: collapse;">
-                <tr style="background:#616161; color:white; text-align:left;"><th>COUNTRY</th><th>PROPERTY</th><th>CONFIRMATION CODE</th><th>OFFBOARDING GUESTY</th><th>CHECK IN</th><th>CHECK OUT</th><th>STATUS</th></tr>
+                <tr style="background:#616161; color:white; text-align:left;">
+                    <th>COUNTRY</th><th>PROPERTY</th><th>CONFIRMATION CODE</th><th>OFFBOARDING GUESTY</th><th>CHECK IN</th><th>CHECK OUT</th><th style="text-align: center;">STATUS</th><th style="text-align: center;">STATUS GUESTY</th>
+                </tr>
                 {table_reactive}
             </table>
 
@@ -135,6 +153,6 @@ def send_alert_email(proactive_data, reactive_data):
         server.login(sender, password)
         server.sendmail(sender, recipients, msg.as_string())
         server.quit()
-        logger.info("✅ Reporte Completo (3 Secciones) enviado.")
+        logger.info("✅ Reporte Completo (3 Secciones + Guesty) enviado.")
     except Exception as e:
         logger.error(f"❌ Falló envío: {e}")
