@@ -117,14 +117,14 @@ def send_alert_email(proactive_data, alerts_data, reactive_data):
             <div style="background-color: #FFF3F3; padding: 15px; border-left: 5px solid #D32F2F; margin: 20px 0; border-radius: 4px;">
                 <h3 style="margin-top: 0; color: #D32F2F;">Resumen de Alertas (Check-Out > Offboarding):</h3>
                 <ul style="margin-bottom: 0;">
-                    <li><b>🚨 Alertas Activas (Deptos en ACTIVE):</b> {current_alert_count} reservas detectadas.</li>
-                    <li><b>🗄️ Alertas Históricas (Deptos en INACTIVE):</b> {reactive_count} reservas registradas.</li>
+                    <li><b>🚨 Alertas Activas (Departamentos Activos):</b> {current_alert_count} reservas detectadas.</li>
+                    <li><b>🗄️ Alertas Históricas (Departamentos Inactivos):</b> {reactive_count} reservas registradas.</li>
                 </ul>
             </div>
             
             <p>En el archivo de Excel adjunto encontrarán las siguientes pestañas a detalle:</p>
             <ul style="padding-left: 20px;">
-                <li><b>🏢 Inventario Deptos:</b> Lista limpia de los departamentos (activos) que tienen fecha de Blockoff.</li>
+                <li><b>🏢 Inventario Deptos:</b> Lista de los departamentos (activos) que tienen fecha de Blockoff.</li>
                 <li><b>🚨 Alertas Activas:</b> El detalle de las reservas críticas que debemos atender.</li>
                 <li><b>🗄️ Alertas Históricas:</b> El registro de incidencias pasadas.</li>
             </ul>
