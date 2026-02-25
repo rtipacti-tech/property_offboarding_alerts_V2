@@ -43,7 +43,6 @@ def get_proactive_report():
     cur = None
     try:
         cur = conn.cursor(cursor_factory=RealDictCursor)
-        # ⚠️ YA NO SE USA reservation_gold AQUÍ ⚠️
         query = """
         SELECT DISTINCT
             mv.country AS "country",
@@ -51,9 +50,11 @@ def get_proactive_report():
             mv.offboarding_guesty AS "offboarding_date",
             gl.data ->> 'active' AS "status_json"
         FROM mv_listings mv
-        LEFT JOIN guesty_listing gl ON mv.nickname = gl.nickname
+        -- 👇 INNER JOIN: Solo propiedades que realmente existen en Guesty
+        JOIN guesty_listing gl ON mv.nickname = gl.nickname
         WHERE 
             mv.offboarding_guesty IS NOT NULL
+            AND gl.data ->> '_id' IS NOT NULL
             
             -- CONDICIÓN 1: Siguen ACTIVE en Guesty
             AND lower(trim(gl.data ->> 'active')) = 'true'
@@ -93,10 +94,12 @@ def get_active_alerts_report():
             TO_DATE(regexp_replace(r."CHECK OUT", '[[:space:]]+', '', 'g'), 'DD/MM/YYYY') AS "check_out_date"
         FROM reservation_gold r
         JOIN mv_listings mv ON r."LISTING'S NICKNAME" = mv.nickname
-        LEFT JOIN guesty_listing gl ON r."LISTING'S NICKNAME" = gl.nickname
+        -- 👇 INNER JOIN: Solo propiedades que realmente existen en Guesty
+        JOIN guesty_listing gl ON r."LISTING'S NICKNAME" = gl.nickname
         WHERE 
             lower(trim(r."STATUS")) = 'confirmed'
             AND mv.offboarding_guesty IS NOT NULL
+            AND gl.data ->> '_id' IS NOT NULL
             
             -- CONDICIÓN 1: Siguen ACTIVE en Guesty
             AND lower(trim(gl.data ->> 'active')) = 'true'
@@ -136,10 +139,12 @@ def get_reactive_report():
             TO_DATE(regexp_replace(r."CHECK OUT", '[[:space:]]+', '', 'g'), 'DD/MM/YYYY') AS "check_out_date"
         FROM reservation_gold r
         JOIN mv_listings mv ON r."LISTING'S NICKNAME" = mv.nickname
-        LEFT JOIN guesty_listing gl ON r."LISTING'S NICKNAME" = gl.nickname
+        -- 👇 INNER JOIN: Solo propiedades que realmente existen en Guesty
+        JOIN guesty_listing gl ON r."LISTING'S NICKNAME" = gl.nickname
         WHERE 
             lower(trim(r."STATUS")) = 'confirmed'
             AND mv.offboarding_guesty IS NOT NULL
+            AND gl.data ->> '_id' IS NOT NULL
             
             -- CONDICIÓN 1: Ya están INACTIVE en Guesty (Registro Histórico)
             AND lower(trim(gl.data ->> 'active')) = 'false'
