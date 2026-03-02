@@ -107,3 +107,105 @@ python src/main.py
 3. If data is found, it processes the data into an Excel file in memory.
 4. An email is sent to the configured recipients with the Excel file attached.
 5. If no data is found, it logs "No data to report" and exits.
+
+## Report Logic Documentation
+
+The system generates three distinct types of reports within a single Excel file.
+
+### Proactive Inventory
+
+Identifies properties that are technically "Active" in the system but have an offboarding date set more than 30 days ago.
+
+#### Logic Flow
+
+```mermaid
+graph TD
+    A[Fetch Listings] --> B{Has Offboarding Date?}
+    B -- Yes --> C{Status == ACTIVE?}
+    C -- Yes --> D{Offboarding < Today - 30 days?}
+    D -- Yes --> E[Add to Report]
+```
+
+### Active Alerts
+
+Detects **urgent** violations where a reservation exists after the offboarding date in a property that is still active.
+
+#### Logic Flow
+
+```mermaid
+graph TD
+    A[Fetch Reservations] --> B{Status == Confirmed}
+    B -- Yes --> C{Property Status == ACTIVE}
+    C -- Yes --> D{Check-Out Date > Offboarding Date}
+    D -- Yes --> E[Trigger Alert]
+```
+
+### Reactive History
+
+Logs historical violations for properties that are now "Inactive". This is useful for auditing past operational failures.
+
+#### Logic Flow
+
+```mermaid
+graph TD
+    A[Fetch Reservations] --> B{Status == Confirmed}
+    B -- Yes --> C{Property Status == INACTIVE}
+    C -- Yes --> D{Check-Out Date > Offboarding Date}
+    D -- Yes --> E[Log Historical Record]
+```
+
+## Data Flow
+
+The overall data flow through the system is as follows:
+
+```mermaid
+graph LR
+    A[PostgreSQL] -->|Raw Rows| B[database.py]
+    B -->|List of Dicts| C[main.py]
+    C -->|Data| D[mailer.py]
+    D -->|Pandas DataFrame| E[Excel Buffer]
+    E -->|Attachment| F[SMTP Server]
+    F -->|Email| G[Stakeholders]
+```
+
+## Configuration Options
+
+Configuration is managed primarily through the `.env` file.
+
+- **Database**: Connection parameters (`DB_HOST`, `DB_PORT`, etc.).
+- **Email**: Sender credentials and recipient lists (`EMAIL_CX`, `EMAIL_RODRIGO`). Recipient lists are comma-separated.
+
+## Performance Considerations
+
+- **Database Connections**: The system uses a retry mechanism (3 attempts) with a backoff delay to handle transient network issues.
+- **Memory Usage**: Excel files are generated in-memory using `io.BytesIO` buffers to avoid writing temporary files to disk, which improves performance in containerized environments.
+
+## Error Handling
+
+The system includes specific mechanisms to handle failures:
+
+- **Database Retry Logic**: The `DatabaseManager` attempts to execute queries with retries on operational errors.
+- **Exception Catching**: The main execution block is wrapped in a `try-except` block to catch fatal errors and log them with `logger.critical`.
+- **Logging**: All errors and info messages are saved to `execution.log` for post-mortem analysis.
+
+## Integration Points
+
+- **PostgreSQL**: Source of truth for listings and reservations (`mv_listings`, `guesty_listing`, `reservation_gold`).
+- **SMTP (Gmail)**: Used for delivering the reports. Requires an App Password if using 2FA.
+
+## Troubleshooting
+
+### Common Issues
+
+**Issue**: Connection to database fails.
+**Solution**: Verify IP whitelisting for the database host and check credentials in `.env`.
+
+**Issue**: Email not sending.
+**Solution**: Check `execution.log` for SMTP authentication errors. Ensure `EMAIL_SENDER` has "Less secure app access" enabled or use an App Password.
+
+**Issue**: Empty Excel file.
+**Solution**: The system is designed to only send an email if data exists. If you receive no email, it likely means no violations were found (System is clean).
+
+## License
+
+This project is licensed under the MIT License.

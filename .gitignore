@@ -201,6 +201,10 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 
+# Windows & Excel
+Thumbs.db
+*.xlsx
+
 # Marimo
 marimo/_static/
 marimo/_lsp/
